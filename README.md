@@ -1,2 +1,2 @@
-# ms_sql
+# DB
 Learning databases
