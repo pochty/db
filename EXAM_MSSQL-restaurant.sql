@@ -59,7 +59,7 @@ CREATE TABLE RecipeItem (
         REFERENCES Item(ItemId),
 );
 
---Kitchen: type 1 - hot, type 1 - cold
+--Kitchen: type 1 - hot, type 2 - cold
 CREATE TABLE Kitchen (
     KitchenId INT IDENTITY,
     RecipeId INT NOT NULL UNIQUE,
@@ -133,6 +133,21 @@ CREATE TABLE SaleOrderItem (
     CONSTRAINT fk_SaleOrderRecipeId
         FOREIGN KEY (RecipeId)
         REFERENCES Recipe(RecipeId),
+);
+
+CREATE TABLE RefuseItem (
+    RefuseItemId INT IDENTITY,
+    ItemId INT NOT NULL,
+    PersonId INT NOT NULL,
+    Quantity INT DEFAULT 0,
+    RefuseDate DATETIME2 DEFAULT GETDATE(),
+    PRIMARY KEY (RefuseItemId),
+    CONSTRAINT fk_RefuseItemId 
+        FOREIGN KEY (ItemId)
+        REFERENCES Item(ItemId),
+    CONSTRAINT fk_RefusePersonId
+        FOREIGN KEY (PersonId)
+        REFERENCES Person(PersonId)
 );
 GO
 
@@ -276,11 +291,12 @@ BEGIN
         CASE @KitchenType
             WHEN 'hot' THEN 1
             WHEN 'cold' THEN 2
-            ELSE NULl
+            ELSE NULL
         END;
     INSERT INTO Kitchen (RecipeId, KitchenType)
     VALUES (@RecipeId, @KitchenTypeInt);
 END;
+GO
 
 --Create supplier
 CREATE OR ALTER PROCEDURE dbo.up_CreateSupplier
@@ -359,18 +375,32 @@ BEGIN
 END;
 GO
 
+--Create refuse
+CREATE OR ALTER PROCEDURE dbo.up_CreateRefuseItem
+    @ItemId INT,
+    @PersonId INT,
+    @Quantity INT
+AS
+BEGIN
+    INSERT INTO RefuseItem (ItemId, PersonId, Quantity)
+    VALUES (@ItemId, @PersonId, @Quantity);
+END;
+GO
 
 --Views
 
 --Stock view
 CREATE OR ALTER VIEW v_Stock AS
-SELECT i.ItemId AS ItemId, i.Title AS Title, SUM(Quantity) AS QntIn, si.Total AS QntOut, SUM(Quantity) - si.Total AS QntRemain
+SELECT i.ItemId AS ItemId, i.Title AS Title, COALESCE(SUM(Quantity), 0) AS QntIn, COALESCE(si.Total, 0) AS QntOut, 
+    COALESCE(ri.Refused, 0) AS Refused, COALESCE(SUM(Quantity), 0) - COALESCE(si.Total, 0) - COALESCE(ri.Refused, 0) AS QntRemain
 FROM Item AS i LEFT JOIN PurchaseOrderItem AS PoI ON i.ItemId = PoI.ItemId 
-    JOIN (SELECT ItemId, SUM(ri.Quantity * soi.Quantity) AS Total
+    LEFT JOIN (SELECT ItemId, SUM(ri.Quantity * soi.Quantity) AS Total
         FROM RecipeItem AS ri JOIN Recipe AS r ON ri.RecipeId = r.RecipeId
-        JOIN SaleOrderItem AS soi ON r.RecipeId = soi.RecipeId GROUP BY ItemId) AS si
-    ON si.ItemId = i.ItemId
-GROUP BY i.ItemId, i.Title, si.Total;
+        JOIN SaleOrderItem AS soi ON r.RecipeId = soi.RecipeId GROUP BY ItemId) AS si ON i.ItemId = si.ItemId 
+    LEFT JOIN (SELECT ItemId, SUM(Quantity) AS Refused
+        FROM RefuseItem
+        GROUP BY ItemId) AS ri ON i.ItemId = ri.ItemId
+GROUP BY i.ItemId, i.Title, si.Total, ri.Refused;
 GO
 
 --Kitchen view
@@ -379,6 +409,7 @@ SELECT r.RecipeId AS RecipeId, r.Title AS Title, k.KitchenType AS KitchenType, S
 FROM Kitchen AS k JOIN Recipe AS r ON k.RecipeId = r.RecipeId
     JOIN SaleOrderItem AS soi ON r.RecipeId = soi.RecipeId
 GROUP BY r.RecipeId, r.Title, k.KitchenType;
+GO
 
 --Populate data
 
@@ -531,3 +562,17 @@ BEGIN
 END;
 GO
 
+--Populate refuse
+DECLARE @ItemId INT;
+DECLARE @PersonId INT;
+DECLARE @Quantity INT;
+DECLARE @i INT = 0;
+WHILE @i < 30
+BEGIN
+    SET @i += 1;
+    SET @ItemId = CAST(RAND()*19 + 1 AS INT);
+    SET @PersonId = CAST(RAND()*4 + 1 AS INT);
+    SET @Quantity = CAST(RAND()*100 + 1 AS INT);
+    EXEC up_CreateRefuseItem @ItemId, @PersonId, @Quantity;
+END;
+GO
