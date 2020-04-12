@@ -1,4 +1,4 @@
---!!Not finished!!--
+
 CREATE DATABASE restaurant;
 GO
 USE restaurant;
@@ -34,19 +34,6 @@ CREATE TABLE Item (
         ON UPDATE CASCADE,
 );
 
---Stock
-CREATE TABLE Stock (
-    StockId INT IDENTITY,
-    ItemId INT NOT NULL UNIQUE,
-    Quantity INT DEFAULT 0,
-    PRIMARY KEY (StockId),
-    CONSTRAINT fk_ItemId
-        FOREIGN KEY (ItemId)
-        REFERENCES Item(ItemId)
-        ON UPDATE CASCADE
-        ON DELETE CASCADE,
-);
-
 --Recipe
 CREATE TABLE Recipe (
     RecipeId INT IDENTITY,
@@ -70,6 +57,18 @@ CREATE TABLE RecipeItem (
     CONSTRAINT fk_ItemId
         FOREIGN KEY (ItemId)
         REFERENCES Item(ItemId),
+);
+
+--Kitchen: type 1 - hot, type 1 - cold
+CREATE TABLE Kitchen (
+    KitchenId INT IDENTITY,
+    RecipeId INT NOT NULL UNIQUE,
+    KitchenType INT DEFAULT 1,
+    PRIMARY KEY (KitchenId),
+    CONSTRAINT fk_KitchenRecipeId
+        FOREIGN KEY (RecipeId)
+        REFERENCES Recipe(RecipeId)
+        ON DELETE CASCADE,
 );
 
 --Suppliers
@@ -135,7 +134,6 @@ CREATE TABLE SaleOrderItem (
         FOREIGN KEY (RecipeId)
         REFERENCES Recipe(RecipeId),
 );
-
 GO
 
 --Stored procedures
@@ -153,6 +151,21 @@ BEGIN
 END;
 GO
 
+--Update person
+CREATE OR ALTER PROCEDURE dbo.up_UpdatePerson
+    @FirstName NVARCHAR(500),
+	@MiddleName NVARCHAR(500),
+	@LastName NVARCHAR(500),
+	@BirthDate DATE,
+    @PersonId INT
+AS
+BEGIN
+    UPDATE Person 
+    SET FirstName = @FirstName, MiddleName = @MiddleName, LastName = @LastName, BirthDate = @BirthDate
+    WHERE PersonId = @PersonId;
+END;
+GO
+
 --Create MeasureUnit
 CREATE OR ALTER PROCEDURE dbo.up_CreateMeasureUnit
     @Title NVARCHAR(500),
@@ -161,6 +174,19 @@ AS
 BEGIN
     INSERT INTO MeasureUnit (Title, Details)
     VALUES (@Title, @Details);
+END;
+GO
+
+--Update MeasureUnit
+CREATE OR ALTER PROCEDURE dbo.up_UpdateMeasureUnit
+    @Title NVARCHAR(500),
+    @Details NVARCHAR(2000),
+    @MeasureUnitId INT
+AS
+BEGIN
+    UPDATE MeasureUnit 
+    SET Title = @Title, Details = @Details
+    WHERE MeasureUnitId = @MeasureUnitId;
 END;
 GO
 
@@ -180,6 +206,24 @@ BEGIN
 END;
 GO
 
+--Update Item
+CREATE OR ALTER PROCEDURE dbo.up_UpdateItem
+    @Title NVARCHAR(500),
+    @MeasureUnitTitle NVARCHAR(500),
+    @Details NVARCHAR(2000),
+    @ItemId INT
+AS
+BEGIN
+    DECLARE @MeasureUnitId INT 
+        = (SELECT MeasureUnitId 
+            FROM MeasureUnit 
+            WHERE Title = @MeasureUnitTitle);
+    UPDATE Item 
+    SET Title = @Title, MeasureUnitId = @MeasureUnitId, Details = @Details
+    WHERE ItemId = @ItemId;
+END;
+GO
+
 --Create recipe
 CREATE OR ALTER PROCEDURE dbo.up_CreateRecipe
     @Title NVARCHAR(500),
@@ -195,6 +239,21 @@ BEGIN
 END;
 GO
 
+--Update recipe
+CREATE OR ALTER PROCEDURE dbo.up_UpdateRecipe
+    @Title NVARCHAR(500),
+    @Details NVARCHAR(2000),
+    @OutputWeight INT,
+    @Price SMALLMONEY,
+    @RecipeId INT
+AS
+BEGIN
+    UPDATE Recipe 
+    SET Title = @Title, Details = @Details, OutputWeight = @OutputWeight, Price = @Price
+    WHERE RecipeId = @RecipeId;
+END;
+GO
+
 --Create recipe item
 CREATE OR ALTER PROCEDURE dbo.up_CreateRecipeItem
     @RecipeId INT,
@@ -207,6 +266,22 @@ BEGIN
 END;
 GO
 
+--Set kitchen for recipe
+CREATE OR ALTER PROCEDURE dbo.up_SetKitchen
+    @RecipeId INT,
+    @KitchenType NVARCHAR(30)
+AS
+BEGIN
+    DECLARE @KitchenTypeInt INT =
+        CASE @KitchenType
+            WHEN 'hot' THEN 1
+            WHEN 'cold' THEN 2
+            ELSE NULl
+        END;
+    INSERT INTO Kitchen (RecipeId, KitchenType)
+    VALUES (@RecipeId, @KitchenTypeInt);
+END;
+
 --Create supplier
 CREATE OR ALTER PROCEDURE dbo.up_CreateSupplier
     @Title NVARCHAR(500),
@@ -215,6 +290,19 @@ AS
 BEGIN
     INSERT INTO Supplier (Title, Phone)
     VALUES (@Title, @Phone);
+END;
+GO
+
+--Update supplier
+CREATE OR ALTER PROCEDURE dbo.up_UpdateSupplier
+    @Title NVARCHAR(500),
+    @Phone NVARCHAR(30),
+    @SupplierId INT
+AS
+BEGIN
+    UPDATE Supplier 
+    SET Title = @Title, Phone = @Phone
+    WHERE SupplierId = @SupplierId;
 END;
 GO
 
@@ -270,6 +358,27 @@ BEGIN
     VALUES (@SaleOrderId, @RecipeId, @Quantity, @Price);
 END;
 GO
+
+
+--Views
+
+--Stock view
+CREATE OR ALTER VIEW v_Stock AS
+SELECT i.ItemId AS ItemId, i.Title AS Title, SUM(Quantity) AS QntIn, si.Total AS QntOut, SUM(Quantity) - si.Total AS QntRemain
+FROM Item AS i LEFT JOIN PurchaseOrderItem AS PoI ON i.ItemId = PoI.ItemId 
+    JOIN (SELECT ItemId, SUM(ri.Quantity * soi.Quantity) AS Total
+        FROM RecipeItem AS ri JOIN Recipe AS r ON ri.RecipeId = r.RecipeId
+        JOIN SaleOrderItem AS soi ON r.RecipeId = soi.RecipeId GROUP BY ItemId) AS si
+    ON si.ItemId = i.ItemId
+GROUP BY i.ItemId, i.Title, si.Total;
+GO
+
+--Kitchen view
+CREATE OR ALTER VIEW v_Kitchen AS
+SELECT r.RecipeId AS RecipeId, r.Title AS Title, k.KitchenType AS KitchenType, SUM(soi.Quantity) AS Total
+FROM Kitchen AS k JOIN Recipe AS r ON k.RecipeId = r.RecipeId
+    JOIN SaleOrderItem AS soi ON r.RecipeId = soi.RecipeId
+GROUP BY r.RecipeId, r.Title, k.KitchenType;
 
 --Populate data
 
@@ -421,3 +530,4 @@ BEGIN
     END
 END;
 GO
+
